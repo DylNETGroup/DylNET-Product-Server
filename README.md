@@ -1,10 +1,10 @@
 # DylNET Product Server
 
-A small public GitHub-hosted product-data source for DylNET software.
+Public, static product metadata for DylNET software.
 
-Each product has its own folder. Ventara currently uses only `update.json`,
-but the layout intentionally leaves room for other product-specific files in
-the future without changing the update-check design.
+Each product has its own folder so update metadata can evolve independently and
+future files such as MOTD/announcements can be added without changing unrelated
+features.
 
 ```text
 DylNET-Product-Server/
@@ -15,88 +15,90 @@ DylNET-Product-Server/
 └── README.md
 ```
 
-## Product folders
+## Ventara updater
 
-Ventara only has to fetch `Ventara/update.json`, Karmalita only has to fetch
-`Karmalita/update.json`, and future products can be added as another folder.
-It also keeps product-specific metadata independent if you later add release
-notes, hashes, minimum versions, or update channels.
-
-## One-time setup
-
-1. Create a **public** GitHub repository named `DylNET-Product-Server`.
-2. Upload the contents of this ZIP to the repository root on the `main` branch.
-3. Replace `YOUR-GITHUB-USERNAME` in each product's `update.json` with the
-   GitHub account or organisation that owns the repository.
-4. In Ventara, open `Updates/UpdateConfiguration.cs` and set `GitHubOwner` to
-   the same account/organisation name.
-5. Create GitHub Releases and upload each product's update package as a release
-   asset. The sample files expect `Ventara.zip` and `Karmalita.zip`.
-
-## Ventara
-
-Ventara reads:
+Ventara's primary update source is GitHub's **Repository Contents REST API**:
 
 ```text
-https://raw.githubusercontent.com/<owner>/DylNET-Product-Server/main/Ventara/update.json
+https://api.github.com/repos/DylNETGroup/DylNET-Product-Server/contents/Ventara/update.json
 ```
 
-A Ventara update file looks like this:
+Ventara intentionally does **not** use a mutable `raw/.../main/...` URL as its
+primary source. The API resolves the repository's current default branch and
+returns the file data as a Git object response, avoiding the stale raw-CDN
+behaviour that can show up during rapid manifest edits.
+
+If the REST API is temporarily unavailable or rate-limited, Ventara falls back
+to:
+
+```text
+https://raw.githubusercontent.com/DylNETGroup/DylNET-Product-Server/HEAD/Ventara/update.json
+```
+
+with no-cache headers and a unique cache-busting query value. `HEAD` means the
+fallback also follows the repository's default branch rather than hard-coding
+`main`.
+
+No access token is required because this repository is public. Do not put
+secrets, private keys, credentials, or private API tokens in this repository.
+
+## `update.json`
+
+Example:
 
 ```json
 {
   "schemaVersion": 1,
   "product": "Ventara",
   "version": "2.0.0",
-  "downloadUrl": "https://github.com/YOUR-GITHUB-USERNAME/DylNET-Product-Server/releases/latest/download/Ventara.zip"
+  "downloadUrl": "https://github.com/DylNETGroup/DylNET-Product-Server/releases/download/Ventara-v2.0.0/Ventara.zip"
 }
 ```
 
-Ventara's installed version has one source of truth: the `<Version>` value in
-`Ventara.csproj`.
+`version` is the latest published version. `downloadUrl` is required when that
+version is newer than the installed Ventara version and must be HTTPS.
 
-For example:
+Ventara accepts an optional `displayVersion`. Unknown fields are intentionally
+ignored so this file can gain future metadata without breaking existing
+clients.
+
+## Publishing an update
+
+1. Change Ventara's single local version in `Ventara.csproj`.
+2. Build and test that version.
+3. Publish the package as a GitHub Release asset.
+4. Confirm the release/download exists.
+5. Update `Ventara/update.json` **last** and commit it.
+
+For production, prefer an explicit release tag URL, for example:
+
+```text
+https://github.com/DylNETGroup/DylNET-Product-Server/releases/download/Ventara-v2.0.0/Ventara.zip
+```
+
+This makes the JSON version and binary immutable as a pair. A
+`releases/latest/download/...` URL is convenient but can later resolve to a
+different release.
+
+Ventara's installed version is sourced once from:
 
 ```xml
 <Version>2.0.0</Version>
 ```
 
-is displayed in Ventara as `V2.00`.
+in `Ventara.csproj`; About and the updater both read that compiled version.
 
-To publish V2.00:
+## Future product files
 
-1. Build/package Ventara V2.00.
-2. Create a GitHub Release and upload it as `Ventara.zip`.
-3. Change `Ventara/update.json` to `"version": "2.0.0"` and make sure the
-   `downloadUrl` points at the release asset.
-4. Commit the updated file.
+Keep independent features in independent files. For example, a future layout
+could become:
 
-A V1.00 Ventara install will then show `V1.00 > V2.00` and its update button
-will become **Download update**.
+```text
+Ventara/
+├── update.json
+├── motd.json
+└── announcements.json
+```
 
-## Ventara button states
-
-- Initial: **Check for updates**
-- While checking: **Checking...** (disabled)
-- Up to date: **Check again**
-- Update available: **Download update**
-- Server/network failure: **Try again**
-
-`Download update` opens the configured link in a normal Ventara browser tab.
-If the URL is a direct release-asset link, Ventara's download manager handles
-that download.
-
-## Optional fields
-
-Ventara currently only requires `version`. `downloadUrl` is required when a
-newer version is available. It also accepts an optional `displayVersion` if a
-future release needs custom display text instead of Ventara's normal version
-formatter.
-
-Because each product has its own folder, you can later add other independent
-product files alongside `update.json` without changing Ventara's updater.
-No MOTD or other remote-content feature is implemented by the supplied Ventara
-build; this repository layout simply leaves room for those additions later.
-
-Within `update.json`, useful future fields could include `releaseNotes`,
-`sha256`, `minimumVersion`, and `channel`.
+No MOTD or announcement functionality is implemented just by adding those
+files; this repository structure simply leaves room for them.
